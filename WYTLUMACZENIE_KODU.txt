@@ -1,0 +1,345 @@
+WYTŁUMACZENIE KODU — testy rozpoznawcze technologii
+=====================================================
+Ten plik tłumaczy linijka po linijce kod w 01_AudioTest i 02_UiTest.
+To notatka dla Ciebie (do zrozumienia projektu), nie do pokazywania promotorowi.
+
+
+=====================================================
+CZĘŚĆ 1: 01_AudioTest/Program.cs  (test OpenAL Soft)
+=====================================================
+
+Linia 1   using OpenTK.Audio.OpenAL;
+          Import biblioteki OpenTK, która udostępnia C#-owe wrappery (ALC, AL) na
+          natywną bibliotekę OpenAL Soft.
+
+Linia 3   namespace AudioTest;
+          Nazwa przestrzeni nazw projektu — nieistotne funkcjonalnie, porządkowe.
+
+Linia 5-7 class Program { private const int SampleRate = 44100; ...
+          44100 Hz to standardowa częstotliwość próbkowania audio (jakość CD).
+          Wszystkie generowane tony i bufory będą w tej częstotliwości.
+
+Linia 9   static void Main()
+          Punkt wejścia programu konsolowego.
+
+Linia 11  Console.OutputEncoding = System.Text.Encoding.UTF8;
+          Bez tego polskie znaki (ą, ę, ł...) w Console.WriteLine wyświetlałyby się
+          jako krzaki w konsoli Windows.
+
+Linie 12-16  Komunikaty startowe + Console.ReadLine() — program czeka na ENTER,
+          żeby użytkownik zdążył założyć słuchawki przed startem testu.
+
+--- INICJALIZACJA OPENAL (linie 18-40) ---
+
+Linia 19  ALDevice device = ALC.OpenDevice(null);
+          Otwiera domyślne urządzenie wyjściowe audio systemu (np. słuchawki/karta
+          dźwiękowa). `null` = "użyj domyślnego urządzenia".
+
+Linia 20-24  if (device == ALDevice.Null) { ... return; }
+          Jeśli się nie udało (np. brak sterowników audio) — program kończy się
+          z komunikatem błędu, nie próbuje kontynuować.
+
+Linia 26  ALContext context = ALC.CreateContext(device, (int[]?)null);
+          Kontekst OpenAL — odpowiednik "sesji" pracy z urządzeniem. Trzeba go
+          mieć aktywny (linia 27), żeby wołać jakiekolwiek funkcje AL.*.
+
+Linia 27  ALC.MakeContextCurrent(context);
+          Ustawia ten kontekst jako aktywny dla bieżącego wątku.
+
+Linia 29-34  var error = AL.GetError(); if (error != ALError.NoError) ...
+          OpenAL nie rzuca wyjątków — błędy trzeba sprawdzać ręcznie wołając
+          AL.GetError() po operacjach, które mogły zawiść.
+
+Linia 36  AL.DistanceModel(ALDistanceModel.InverseDistanceClamped);
+          Wybiera wzór matematyczny, według którego OpenAL liczy tłumienie
+          głośności w funkcji odległości źródła od słuchacza. "InverseDistance-
+          Clamped" = głośność spada odwrotnie proporcjonalnie do odległości,
+          z ograniczeniem (clamp) żeby nie urosła nieskończenie blisko źródła.
+
+Linia 38-40  Komunikaty: potwierdzenie sukcesu + nazwa urządzenia audio.
+
+--- PRZYGOTOWANIE DŹWIĘKÓW (linie 42-61) ---
+
+Linia 43-44  byte[] toneA = GenerateSineWave(440, 3.0f); byte[] toneB = ... 880 ...
+          Generuje surowe próbki PCM dwóch czystych tonów sinusoidalnych
+          (440 Hz i 880 Hz — oktawa wyżej) o długości 3 sekund każdy.
+          Patrz niżej opis funkcji GenerateSineWave (linia 145).
+
+Linia 46-47  int bufferA = AL.GenBuffer(); int bufferB = AL.GenBuffer();
+          OpenAL rozdziela dane audio (bufor) od tego, co odtwarza dane (source).
+          GenBuffer tworzy "pusty kontener" na próbki, do którego dopiero
+          wgrywane są dane (BufferData, linia 48-49).
+
+Linia 48-49  AL.BufferData(bufferA, ALFormat.Mono16, toneA, SampleRate);
+          Wgrywa surowe bajty próbek do bufora OpenAL, informując że to audio
+          mono, 16-bit, z podaną częstotliwością próbkowania.
+
+Linia 51-52  int sourceA = AL.GenSource(); int sourceB = AL.GenSource();
+          "Source" (źródło) to obiekt w przestrzeni 3D, który odtwarza dany
+          bufor. To source ma pozycję, głośność bazową, zasięg itd. — nie bufor.
+
+Linia 54-55  AL.Source(sourceA, ALSourcei.Buffer, bufferA); ...
+          Przypisuje bufor z próbkami do danego źródła (źródło "wie", co grać).
+
+Linia 56-57  AL.Source(sourceA, ALSourceb.Looping, true); ...
+          Włącza zapętlanie odtwarzania — dźwięk gra w kółko, dopóki nie zostanie
+          zatrzymany (AL.SourceStop).
+
+Linia 58-61  ReferenceDistance = 3.0f, MaxDistance = 60.0f
+          ReferenceDistance: odległość, przy której głośność = 100% (referencyjna).
+          MaxDistance: odległość, od której dalsze oddalanie już nie przycisza
+          (przy modelu "Clamped" z linii 36).
+
+Linia 63-64  // Słuchacz na pozycji (0,0,0)...  SetListener(...);
+          Ustawia początkową pozycję i orientację "głowy" słuchacza na środek
+          świata, patrzącego w stronę +Z. Funkcja SetListener opisana niżej
+          (linia 132).
+
+--- TEST 1: PANNING LEWO/PRAWO (linie 66-74) ---
+
+Linia 68-69  AL.Source(sourceA, ALSource3f.Position, -5f, 0f, 0f); // lewo
+             AL.Source(sourceB, ALSource3f.Position, 5f, 0f, 0f);  // prawo
+          Ustawia źródło A 5 metrów w lewo (oś X ujemna), źródło B 5 metrów
+          w prawo (oś X dodatnia) względem słuchacza stojącego w (0,0,0).
+
+Linia 70-71  AL.SourcePlay(sourceA); AL.SourcePlay(sourceB);
+          Startuje odtwarzanie obu źródeł jednocześnie.
+
+Linia 72-74  Komunikat + czekanie na ENTER — użytkownik słucha i ocenia, czy
+          440 Hz faktycznie brzmi z lewej, a 880 Hz z prawej.
+
+--- TEST 2: OBRÓT SŁUCHACZA O 360° (linie 76-96) — test najważniejszy ---
+
+Linia 80-81  AL.Source(sourceA, ..., 0f, 0f, 5f);  // przed słuchaczem
+             AL.Source(sourceB, ..., 0f, 0f, -5f); // za słuchaczem
+          Źródła ustawione na stałe przed i za słuchaczem (oś Z). W tym teście
+          źródła NIE ruszają się — rusza się tylko słuchacz (jego orientacja).
+
+Linia 83   Thread.Sleep(2000);
+          2-sekundowa pauza, żeby użytkownik zdążył się zorientować w ustawieniu
+          przed startem obrotu.
+
+Linia 85-92  const int steps = 200; const float totalSeconds = 8f; for (...) {...}
+          Pętla wykonuje pełny obrót słuchacza o 360° (2*PI radianów) w 200
+          малych krokach rozłożonych na 8 sekund. W każdym kroku:
+            - angle = aktualny kąt obrotu (linia 89),
+            - SetListener(..., facingRadians: angle) — aktualizuje orientację
+              "głowy" o ten kąt (linia 90),
+            - Thread.Sleep(...) — czeka chwilę, żeby obrót był odczuwalny jako
+              płynny, nie skokowy (linia 91).
+          To jest mechanizm identyczny z tym, który w docelowej aplikacji
+          będzie wywoływany przy obrocie gracza klawiszami Q/E.
+
+Linia 94-96  Komunikat podsumowujący + czekanie na ENTER.
+
+--- TEST 3: TŁUMIENIE Z ODLEGŁOŚCIĄ (linie 98-115) ---
+
+Linia 101  AL.SourceStop(sourceB);
+          Zatrzymuje drugie źródło, żeby nie przeszkadzało — w tym teście liczy
+          się tylko głośność jednego, oddalającego się źródła (A).
+
+Linia 102  SetListener(position: (0, 0, 0), facingRadians: 0);
+          Resetuje słuchacza do pozycji wyjściowej (po obrocie z testu 2).
+
+Linia 105-111  const int distSteps = 120; for (...) { float z = 2 + 48*(i/120); ... }
+          Pętla w 120 krokach przesuwa źródło A po osi Z od 2 metrów do 50
+          metrów (wzór: start 2m + (50-2)m * ułamek postępu). Przy każdym kroku
+          aktualizuje pozycję źródła i czeka 50 ms — cały przebieg trwa 6 s
+          (120 * 50 ms).
+
+Linia 113-115  Komunikat + ENTER na koniec.
+
+--- SPRZĄTANIE (linie 117-126) ---
+
+Linia 118-123  AL.SourceStop / DeleteSource / DeleteBuffer dla obu źródeł/buforów
+          Zwalnia zasoby OpenAL (źródła i bufory próbek) — dobra praktyka, żeby
+          nie zostawiać "wycieków" po zamknięciu programu.
+
+Linia 124-126  ALC.MakeContextCurrent(ALContext.Null); DestroyContext; CloseDevice
+          Dezaktywuje i usuwa kontekst, zamyka urządzenie audio — analogicznie
+          do "zamknięcia sesji" otwartej na początku (linie 26-27, 19).
+
+--- FUNKCJA SetListener (linie 132-143) ---
+
+Ustawia pozycję i orientację "głowy" słuchacza w przestrzeni 3D OpenAL.
+
+Linia 134  AL.Listener(ALListener3f.Position, x, y, z);
+          Pozycja słuchacza w świecie (współrzędne X,Y,Z).
+
+Linia 135  AL.Listener(ALListener3f.Velocity, 0f, 0f, 0f);
+          Prędkość słuchacza — używana przez OpenAL do efektu Dopplera (zmiana
+          wysokości dźwięku przy ruchu). Tutaj zawsze 0, bo słuchacz się nie
+          przemieszcza w tych testach (tylko obraca albo stoi w miejscu).
+
+Linia 137-141  float[] orientation = { sin(kąt), 0, cos(kąt),  0, 1, 0 };
+          OpenAL opisuje orientację dwoma wektorami 3D sklejonymi w jedną
+          tablicę 6 liczb:
+            - pierwsze 3 liczby = wektor "at" (dokąd słuchacz patrzy),
+              obliczony trygonometrycznie z kąta obrotu wokół osi Y,
+            - kolejne 3 liczby = wektor "up" (gdzie jest "góra" dla słuchacza),
+              tutaj zawsze (0,1,0) = standardowe "góra" świata, bo słuchacz się
+              nie przechyla, tylko obraca w płaskiej płaszczyźnie.
+
+Linia 142  AL.Listener(ALListenerfv.Orientation, ref orientation[0]);
+          Przekazuje tę tablicę 6 liczb do OpenAL. Od tego momentu OpenAL sam
+          przelicza panning/głośność wszystkich źródeł względem nowej orientacji.
+
+--- FUNKCJA GenerateSineWave (linie 145-166) ---
+
+Generuje surowe próbki PCM16 czystego tonu sinusoidalnego — zamiennik wczytania
+pliku WAV.
+
+Linia 147  int sampleCount = (int)(SampleRate * durationSeconds);
+          Ile próbek potrzeba na daną długość nagrania przy danej częstotliwości
+          próbkowania (np. 44100 * 3s = 132300 próbek).
+
+Linia 148  var samples = new short[sampleCount];
+          Tablica próbek audio — każda próbka to liczba 16-bitowa ze znakiem
+          (short), zgodnie z formatem Mono16 użytym w AL.BufferData.
+
+Linia 149  int fadeSamples = SampleRate / 50;
+          Liczba próbek odpowiadająca ~20 ms (1/50 sekundy) — długość fade-in/
+          fade-out opisanego niżej.
+
+Linia 151-161  for (int i = 0; i < sampleCount; i++) { ... }
+          Główna pętla generująca próbkę po próbce:
+            - t (linia 153): czas w sekundach dla próbki i.
+            - value (linia 154): wartość czystego sinusa w tym momencie czasu,
+              dla zadanej częstotliwości (Math.Sin(2π·f·t) — standardowy wzór
+              fali sinusoidalnej).
+            - fade (linie 156-158): współczynnik 0..1. Na początku nagrania
+              (i < fadeSamples) narasta liniowo od 0 do 1, na końcu
+              (i > sampleCount - fadeSamples) opada od 1 do 0, w środku = 1.
+              Bez tego, przy zapętleniu dźwięku (Looping = true, linia 56-57),
+              słyszalny byłby "trzask" na złączeniu końca z początkiem pętli,
+              bo surowy sinus zazwyczaj nie zaczyna/kończy się w punkcie 0.
+            - samples[i] (linia 160): finalna próbka = sinus * fade * maksymalna
+              amplituda short (32767) * 0.6 (dodatkowe wyciszenie o 40%, żeby
+              dźwięk nie "obcinał się" przy dalszym przetwarzaniu przez OpenAL).
+
+Linia 163-164  var bytes = new byte[sampleCount * 2]; Buffer.BlockCopy(...)
+          Konwertuje tablicę short[] na byte[] (każda próbka short = 2 bajty),
+          bo AL.BufferData (linia 48-49) przyjmuje dane jako surowe bajty.
+
+
+=====================================================
+CZĘŚĆ 2: 02_UiTest  (test Avalonia UI + MVVM)
+=====================================================
+
+--- Program.cs ---
+
+Linia 7-8   BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+          Standardowy punkt startowy aplikacji Avalonia na desktop (Windows/
+          Linux/macOS) — tworzy i uruchamia "pętlę" aplikacji okienkowej.
+
+Linia 10-14  AppBuilder.Configure<App>().UsePlatformDetect().WithInterFont().LogToTrace();
+          Konfiguruje aplikację: <App> wskazuje klasę startową (App.axaml.cs),
+          UsePlatformDetect() dobiera odpowiedni backend renderowania dla
+          systemu operacyjnego, WithInterFont() dołącza czcionkę Inter (żeby
+          nie zależeć od czcionek systemowych), LogToTrace() wysyła logi
+          Avalonii do okna Output w Visual Studio (debugowanie).
+
+--- App.axaml.cs ---
+
+Linia 9    public override void Initialize() => AvaloniaXamlLoader.Load(this);
+          Wczytuje definicję App.axaml (style, motyw) powiązaną z tą klasą.
+
+Linia 11-20  OnFrameworkInitializationCompleted() { if (... desktop) { desktop.MainWindow = new MainWindow { DataContext = ... } } }
+          Wywoływane raz, gdy framework Avalonia jest gotowy. Tworzy główne
+          okno (MainWindow) i PRZYPISUJE MU ViewModel jako DataContext — to
+          jest moment, w którym View (XAML) łączy się z ViewModelem (logika/
+          dane). Od tej chwili wszystkie {Binding ...} w MainWindow.axaml
+          odwołują się do właściwości MainWindowViewModel.
+
+--- MainWindow.axaml.cs ---
+
+Linia 7    public MainWindow() => InitializeComponent();
+          InitializeComponent (generowane automatycznie z MainWindow.axaml)
+          tworzy faktyczne kontrolki UI opisane w XAML-u.
+
+--- MainWindowViewModel.cs ---
+
+Linia 1-2  using CommunityToolkit.Mvvm.ComponentModel; using ...Input;
+          Import atrybutów generujących kod automatycznie (source generators)
+          z biblioteki CommunityToolkit.Mvvm.
+
+Linia 10   public partial class MainWindowViewModel : ObservableObject
+          `partial` jest wymagane, bo CommunityToolkit.Mvvm dogeneruje drugą
+          część tej klasy w tle (property'sy, komendy). ObservableObject
+          implementuje INotifyPropertyChanged — mechanizm, przez który UI
+          "dowiaduje się", że dana wartość się zmieniła i trzeba odświeżyć
+          widok.
+
+Linia 12-13  [ObservableProperty] private int _counter = 0;
+          Ten atrybut automatycznie generuje publiczną właściwość `Counter`
+          (z dużej litery) na bazie prywatnego pola `_counter`, razem z
+          powiadomieniem UI o zmianie wartości. W kodzie widać tylko pole —
+          właściwość `Counter`, do której binduje się XAML (linia 25
+          MainWindow.axaml), jest dogenerowana automatycznie w tle przez
+          kompilator (source generator), nie trzeba jej pisać ręcznie.
+
+Linia 15-16  [ObservableProperty] private string _status = "...";
+          Analogicznie — generuje właściwość `Status`, z wartością początkową
+          wyświetlaną w oknie przy starcie.
+
+Linia 18   [RelayCommand]
+          Generuje właściwość `IncrementCommand` typu ICommand na bazie metody
+          `Increment()` poniżej. To ta właściwość jest bindowana do przycisku
+          w XAML (Command="{Binding IncrementCommand}", linia 21-22
+          MainWindow.axaml).
+
+Linia 19-23  private void Increment() { Counter++; Status = $"..."; }
+          Metoda wywoływana po kliknięciu przycisku: zwiększa licznik i
+          aktualizuje tekst statusu. Dzięki [ObservableProperty] obie zmiany
+          automatycznie odświeżają UI — nie trzeba ręcznie wołać żadnego
+          "Refresh" czy "Repaint".
+
+--- MainWindow.axaml ---
+
+Linia 1-7  <Window ... xmlns:vm="using:UiTest" x:DataType="vm:MainWindowViewModel" ...>
+          Deklaracja okna. x:DataType mówi kompilatorowi XAML, jakiego typu
+          jest DataContext tego okna — to włącza "compiled bindings"
+          (sprawdzane w czasie kompilacji, szybsze i bezpieczniejsze niż
+          klasyczne bindowanie refleksją).
+
+Linia 9-11  <Design.DataContext><vm:MainWindowViewModel/></Design.DataContext>
+          Fałszywy DataContext używany WYŁĄCZNIE przez podgląd projektanta
+          w Visual Studio/Rider (żeby widzieć realistyczny podgląd okna przy
+          edycji XAML) — nie ma wpływu na działanie aplikacji w runtime.
+
+Linia 13   <StackPanel Margin="30" Spacing="20" VerticalAlignment="Center">
+          Układa dzieci (kontrolki) w kolumnie, z 20px odstępem między nimi.
+
+Linia 17-18  <TextBlock Text="{Binding Status}" .../>
+          Wyświetla tekst z właściwości `Status` ViewModelu. Gdy `Status` się
+          zmieni (po kliknięciu przycisku), ten TextBlock automatycznie się
+          zaktualizuje — to jest efekt mechanizmu ObservableObject.
+
+Linia 20-23  <Button Content="Kliknij mnie" Command="{Binding IncrementCommand}" .../>
+          Przycisk, który po kliknięciu wywołuje komendę `IncrementCommand`
+          (czyli metodę Increment() z ViewModelu).
+
+Linia 25-26  <TextBlock Text="{Binding Counter, StringFormat='Licznik: {0}'}" .../>
+          Wyświetla wartość `Counter`, sformatowaną jako "Licznik: N".
+
+--- App.axaml ---
+
+Linia 5-7  <Application.Styles><FluentTheme /></Application.Styles>
+          Ustawia motyw wizualny Fluent (styl kontrolek zgodny z nowym
+          Windows/Office) dla całej aplikacji.
+
+
+=====================================================
+PODSUMOWANIE — co z tego wynika dla docelowej aplikacji
+=====================================================
+
+1. 01_AudioTest potwierdza mechanizm, który będzie sercem nawigacji w aplikacji
+   docelowej: SetListener (pozycja + orientacja słuchacza) jest wywoływane
+   przy każdym ruchu/obrocie gracza (WSAD/QE), a AL.Source(..., Position, ...)
+   przy każdym rozmieszczeniu źródła dźwięku na mapie. OpenAL resztę (panning,
+   tłumienie, HRTF) liczy sam.
+
+2. 02_UiTest potwierdza szkielet MVVM: ViewModel z [ObservableProperty] i
+   [RelayCommand] + View z {Binding ...} — to ten sam wzorzec, który będzie
+   użyty do zbudowania UI docelowej aplikacji (lista źródeł dźwięku, panel
+   trybu tworzenia sceny, itd.), tylko z większą liczbą właściwości i komend.
