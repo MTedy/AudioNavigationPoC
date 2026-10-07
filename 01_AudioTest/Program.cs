@@ -1,4 +1,5 @@
 using OpenTK.Audio.OpenAL;
+using System.IO;
 
 namespace AudioTest;
 
@@ -40,13 +41,25 @@ class Program
         Console.WriteLine();
 
         // ---------- Przygotowanie dwóch tonów (bez plików WAV) ----------
-        byte[] toneA = GenerateSineWave(frequencyHz: 440, durationSeconds: 3.0f);  // ton "A"
-        byte[] toneB = GenerateSineWave(frequencyHz: 880, durationSeconds: 3.0f);  // ton "B", oktawę wyżej
+        Console.WriteLine("Wczytywanie pliku test.wav...");
+        if (!File.Exists("test.wav"))
+        {
+            Console.WriteLine("BŁĄD: Brak pliku test.wav w katalogu z aplikacją!");
+            return;
+        }
+
+        byte[] audioData = LoadWav("test.wav", out ALFormat format, out int parsedSampleRate);
+
+        if (format == ALFormat.Stereo8 || format == ALFormat.Stereo16)
+        {
+            Console.WriteLine("UWAGA: Plik WAV jest w formacie Stereo! Zjawisko dźwięku przestrzennego zadziała poprawnie TYLKO dla plików Mono.");
+        }
 
         int bufferA = AL.GenBuffer();
         int bufferB = AL.GenBuffer();
-        AL.BufferData(bufferA, ALFormat.Mono16, toneA, SampleRate);
-        AL.BufferData(bufferB, ALFormat.Mono16, toneB, SampleRate);
+        // Wczytujemy ten sam plik do obu źródeł (A i B)
+        AL.BufferData(bufferA, format, audioData, parsedSampleRate);
+        AL.BufferData(bufferB, format, audioData, parsedSampleRate);
 
         int sourceA = AL.GenSource();
         int sourceB = AL.GenSource();
@@ -69,7 +82,7 @@ class Program
         AL.Source(sourceB, ALSource3f.Position, 5f, 0f, 0f);  // ton B: prawo
         AL.SourcePlay(sourceA);
         AL.SourcePlay(sourceB);
-        Console.WriteLine("Powinieneś słyszeć: ton 440 Hz po LEWEJ stronie, ton 880 Hz po PRAWEJ stronie.");
+        Console.WriteLine("Powinieneś słyszeć ten sam dźwięk z pliku test.wav: po LEWEJ i po PRAWEJ stronie.");
         Console.WriteLine("Naciśnij ENTER, aby przejść do testu 2...");
         Console.ReadLine();
 
@@ -163,5 +176,40 @@ class Program
         var bytes = new byte[sampleCount * 2];
         Buffer.BlockCopy(samples, 0, bytes, 0, bytes.Length);
         return bytes;
+    }
+
+    private static byte[] LoadWav(string filePath, out ALFormat format, out int sampleRate)
+    {
+        using var reader = new BinaryReader(File.OpenRead(filePath));
+
+        reader.ReadBytes(12); // Pomiń nagłówki "RIFF", file size, "WAVE"
+        reader.ReadBytes(4);  // Pomiń "fmt "
+        reader.ReadInt32();   // Pomiń chunk size
+        reader.ReadInt16();   // Pomiń audio format
+        int channels = reader.ReadInt16();
+        sampleRate = reader.ReadInt32();
+        reader.ReadInt32();   // Pomiń byte rate
+        reader.ReadInt16();   // Pomiń block align
+        int bitsPerSample = reader.ReadInt16();
+
+        // Szukanie danych audio (chunk "data")
+        string chunkId = System.Text.Encoding.ASCII.GetString(reader.ReadBytes(4));
+        int chunkSize = reader.ReadInt32();
+        while (chunkId != "data")
+        {
+            reader.BaseStream.Seek(chunkSize, SeekOrigin.Current);
+            chunkId = System.Text.Encoding.ASCII.GetString(reader.ReadBytes(4));
+            chunkSize = reader.ReadInt32();
+        }
+
+        byte[] audioData = reader.ReadBytes(chunkSize);
+
+        if (channels == 1 && bitsPerSample == 8) format = ALFormat.Mono8;
+        else if (channels == 1 && bitsPerSample == 16) format = ALFormat.Mono16;
+        else if (channels == 2 && bitsPerSample == 8) format = ALFormat.Stereo8;
+        else if (channels == 2 && bitsPerSample == 16) format = ALFormat.Stereo16;
+        else throw new NotSupportedException("Nieobsługiwany format WAV");
+
+        return audioData;
     }
 }
