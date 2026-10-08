@@ -1,6 +1,7 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:UiTest"
+        xmlns:automation="using:Avalonia.Automation"
         x:Class="UiTest.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="Test rozpoznawczy: Avalonia UI na .NET 10"
@@ -14,11 +15,15 @@
         <TextBlock Text="Test rozpoznawczy: Avalonia UI"
                    FontSize="20" FontWeight="Bold" HorizontalAlignment="Center"/>
 
-        <TextBlock Text="{Binding Status}"
-                   TextWrapping="Wrap" HorizontalAlignment="Center"/>
+        <TextBlock x:Name="StatusText"
+                   Text="{Binding Status}"
+                   TextWrapping="Wrap" HorizontalAlignment="Center"
+                   automation:AutomationProperties.LiveSetting="Polite"/>
 
-        <Button Content="Kliknij mnie"
+        <Button x:Name="KlikButton"
+                Content="Kliknij mnie"
                 Command="{Binding IncrementCommand}"
+                IsDefault="True"
                 HorizontalAlignment="Center"
                 Padding="20,10"/>
 
